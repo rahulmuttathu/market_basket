@@ -1,0 +1,331 @@
+---
+title: "Instacart Market Basket Analysis"
+author: "Rahul Muttathu Sasikumar"
+date: "June 26, 2019"
+output: 
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+##{.tabset .tabset-fade}
+### **Introduction**
+
+```{r, out.width = "1000px", echo=FALSE}
+
+knitr::include_graphics("insta.jpg")
+
+```
+
+Instacart is a San Fransisco based company that operates as a same-day grocery delivery service. Customers select groceries through a web application from various retailers and delivered by a personal shopper. This study makes use of the Instacart Online Grocery Shopping Dataset. This dataset contains a sample of over 3 million grocery orders from more than 200,000 Instacart users.
+
+As part of the study, item suggestions based on market basket analysis is performed.An exploratory data analysis is performed initially. Apriori algorithm and association rules are used as initial model.The relationships between the products that customers buy are identified to increase the chances of cross selling.
+
+### **Packages Required**
+
+To analyze this data, we will use the following R packages:
+
+* pacman: To load packages and install missing ones
+* readr: Fast data load.
+* data.table: Fast data load.
+* tidyverse: Package of multiple R packages used for data manipulation
+* dplyr: Easy functions to perform data manipulation in R.
+* stringr: String operations in R
+* DT: Package to put data objects in R as HTML tables
+* ggplot2: Data visualisation in R mining for word processing and sentiment analysis
+* treemap: Package for tree map visulaization
+* arules : Package for mining Association Rules and Frequent Itemsets
+* arulesviz : Package for visualizing Association Rules and Frequent Itemsets
+
+```{r,message=FALSE,warning=FALSE}
+if (!require("pacman")) install.packages("pacman")
+
+# p_load function installs missing packages and loads all the packages given as input
+pacman::p_load("readr", 
+               "data.table", 
+               "tidyverse", 
+               "dplyr", 
+               "stringr", 
+               "DT", 
+               "ggplot2",
+               "knitr",
+               "magrittr",
+               "treemap",
+               "arules",
+               "arulesViz")
+```
+
+### **Data Preparation**{.tabset .tabset-fade}
+#### **Source Data**
+
+Instacart is an American company that operates as a same-day grocery delivery service. The Instacart Online Grocery Shopping dataset 2017 used in this study.
+
+In the dataset you'll find information about businesses across 11 metropolitan areas in four countries. There are 6 tables available that containes business related information
+
+* orders: Contains details of the grocery orders customers made.
+* products: Contains the details of the products offered.
+* aisles : Contains the aisle_id and aisle name.
+* deptartments : Contains the department name.
+* order_products__SET : These files specify which products were purchased in each order.
+* where SET is one of the four following evaluation sets (eval_set in orders):
+
+"prior": orders prior to that users most recent order.
+"train": training data supplied to participants.
+"test": test data reserved for testing machine learning algorithms.
+
+#### **Data Import**
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+# import the data files
+orders <- fread("orders.csv")
+products <- fread("products.csv")
+aisles <- read_csv("aisles.csv")
+departments <- fread("departments.csv")
+order_products_train <- fread("order_products__train_cap.csv")
+order_products_prior <- read_csv("order_products__prior.csv")
+```
+
+#### **Sample Data**{.tabset .tabset-fade}
+##### **Orders**
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+# Displays 10 rows of checkin table
+orders$order_dow = as.factor(orders$order_dow)
+orders$order_hour_of_day = as.factor(orders$order_hour_of_day)
+datatable(head(orders, n = 10), class = 'cell-border stripe hover condensed responsive')
+
+```
+
+##### **Products**
+```{r}
+# Displays 10 rows of checkin table
+
+datatable(head(products, n = 10), class = 'cell-border stripe hover condensed responsive')
+
+```
+
+##### **Departments**
+```{r}
+# Displays 10 rows of checkin table
+
+datatable(head(departments, n = 10), class = 'cell-border stripe hover condensed responsive')
+
+```
+
+##### **Aisles**
+```{r}
+# Displays 10 rows of checkin table
+
+datatable(head(aisles, n = 10), class = 'cell-border stripe hover condensed responsive')
+```
+
+##### **Order_products_prior**
+```{r}
+# Displays 10 rows of checkin table
+
+datatable(head(order_products_prior, n = 10), class = 'cell-border stripe hover condensed responsive')
+```
+
+##### **Order_products_train**
+```{r}
+
+# Displays 10 rows of checkin table
+
+datatable(head(order_products_train, n = 10), class = 'cell-border stripe hover condensed responsive')
+```
+
+### **Exploratory Data Analysis**{.tabset .tabset-fade}
+
+Buying patterns of users are analysed by the day at which they purchase and the department to which they belong.
+
+#### **By weekday and time of order**
+
+```{r}
+
+ orders %>% 
+  ggplot(aes(x= order_dow, fill = order_dow)) + 
+  geom_histogram(stat = "count") +
+  scale_fill_brewer(type = "qual", palette = "Set1")
+
+```
+
+Weekends have more orders than weekdays.
+
+```{r}
+
+ orders %>% 
+  ggplot(aes(x= order_hour_of_day, fill = order_dow)) + 
+  geom_histogram(stat="count") +
+  facet_wrap(~ order_dow, ncol = 2) +
+  scale_fill_brewer(type = "qual", palette = "Set1")
+
+```
+
+Monday to Thursday follows a double camel hump shape with first peak from 9-11 hours and second peak around 13-15 hours. This indicates that the users order groceries either in the morning or during lunch time on working days. But this pattern is slightly different for weekends.
+
+#### **By aisles and departments**
+
+Though produce offers lesser number of unique products compareed to departments like personal care, snacks and pantry. But, most ordered products are from the produce department which contains vegetables and fruits.
+
+```{r}
+
+products %>% 
+  group_by(department_id, aisle_id) %>% summarize(count=n()) %>%
+  left_join(departments,by="department_id") %>% 
+  left_join(aisles,by="aisle_id") %>%
+  treemap(index=c("department","aisle"),vSize="count",title="Tree map of Unique products offered in each Department/   aisle",palette="Set1",border.col="#FFFFFF") 
+  
+
+```
+
+```{r}
+
+order_products_train %>% 
+  group_by(product_id) %>% 
+  summarize(count=n()) %>% 
+  left_join(products,by="product_id") %>% 
+  ungroup() %>% 
+  group_by(department_id,aisle_id) %>% 
+  summarize(sumcount = sum(count)) %>% 
+  left_join(departments,by="department_id") %>% 
+  left_join(aisles,by="aisle_id") %>%
+  mutate(onesize = 1) %>%
+  treemap(index=c("department","aisle"),vSize="sumcount",title="Tree map of most ordered products in Department/Aisle",palette="Set1",border.col="#FFFFFF")
+
+```
+
+#### **Frequent item analysis**
+
+```{r}
+
+# Split the "Product ID" values into groups based on "Order ID" variable
+order_product <- order_products_prior %>% 
+  left_join(products, by = "product_id")
+
+
+transactions <- as(split(order_product$product_name,order_product$order_id),"transactions")
+
+hist(size(transactions), 
+     breaks = 0:150, 
+     xaxt="n", 
+     ylim=c(0,250000), 
+     col = "blue",
+     main = "Number of Products per Order", 
+     xlab = "Order Size:Number of Products")
++ axis(1, 
+     at = seq(0,160,by=10)) + 
+mtext(paste("Total:", length(transactions), "Orders,", sum(size(transactions)), "Products"))
+
+```
+
+
+ITEM FREQUENCY PLOT
+
+Top 10 items most frequently bought are shown below. Only items with a support of atleast 0.01 (Appears at least in 1% of the transactions) are considered for this.
+
+```{r}
+
+itemFrequencyPlot(transactions,
+                  support = 0.01,
+                  cex.names = 0.8,
+                  horiz = TRUE, topN = 10)
+
+```
+
+### **Market Basket Analysis**{.tabset .tabset-fade}
+
+#### **Apriori algorithm and association rules**
+
+* Support : This is a quantifies the popularity of an item and is measured as the proportion of transactions in which the item appears.We can identify itemsets that have support values beyond this threshold as significant itemsets.
+supp(X) = (Number of transactions in which X appears)/(Total number of transactions)
+
+* Confidence : This shows how likely item B is added to cart when item A is purchased. It is measured as the proportion of transactions of item A in which item B is also purchased. for example If conf (A -> B) is 75%, it implies that, for 75% of transactions containing A & B, this rule is correct. If item B is very popular, then value of confidence will also be high. So confidence alone cannot be used for association.
+conf(A -> B) = supp(A U B) / supp( A )
+
+* Lift : This is measured as the ratio of the observed support to that expected if A and B were independent. Lift value of 1 indicates that the two items are independent of each other. If value is greater than 1, then it indicates B is likely to be bought along with A.
+lift (A -> B) = supp (A U B)/( supp(A) supp (B) )
+
+Conviction :
+conv (A->B) = (1-supp(A))/(1-conf(A-B))
+
+If the conviction means 1.4, it means that the rule A -> B would be incorrect 40% more often if the association between A & B was an accidental chance.
+
+#### **Market Basket Analysis**
+
+Using association rules and market basket analysis, set of rules are created. Suport value of 0.00001, confidence of 0.4 and maximum number of items of 3 are used.
+
+```{r}
+
+basket_rules<-apriori(transactions,parameter = list(sup=0.00001,conf=0.4,maxlen=3,target="rules", maxtime=20))
+
+summary(basket_rules)
+
+kable(inspect(head(sort(basket_rules, decreasing = TRUE, na.last = NA, by = "lift"), n = 10)))
+
+#Frequently ordered products
+
+#We find 15 products to occur when the support is set at 0.03. This means these products are found in 3% of the total transactions which is approximately about 90,000
+
+item_frequencies <- itemFrequency(transactions, type="a")
+support <- 0.03
+freq_items <- sort(item_frequencies, decreasing = F)
+freq_items <- freq_items[freq_items>support*length(transactions)]
+
+par(mar=c(2,10,2,2)); options(scipen=5)
+
+barplot(freq_items, horiz=T, las=1, main="Frequent Items", cex.names=.8, xlim=c(0,500000))
+mtext(paste("support:",support), padj = .8)
+abline(v=support*length(transactions), col="red")
+
+```
+
+We desire to make 2 products and 3 product combinations and hence we choose a lower support = 0.003 which means the product is in around 0.3 % of 3 million transactions that is about 10,000 times the product is sold
+
+```{r}
+
+#Frequent items bought together
+
+basket_rules <- apriori(transactions,parameter = list(sup=0.0003, conf=0.5, target="rules", maxtime=20))
+
+```
+
+This scatter plot illustrates the relationship between the different metrics. It has been shown that the optimal rules are those that lie on what's known as the "support-confidence boundary". Essentially, these are the rules that lie on the right hand border of the plot where either support, confidence or both are maximised.
+
+```{r message=FALSE, warning=FALSE}
+
+plot(basket_rules)
+
+```
+
+
+
+
+```{r fig.width=1000, message=FALSE, warning=FALSE}
+inspect(subset(basket_rules,size(basket_rules)>3))
+```
+
+
+
+```{r fig.width=1000, message=FALSE, warning=FALSE}
+
+kable(inspect(head(sort (basket_rules, by="confidence", decreasing=TRUE))))
+
+```
+
+```{r fig.width=1000, message=FALSE, warning=FALSE}
+
+kable(inspect(head(sort (basket_rules, by="lift", decreasing=TRUE))))
+
+BW_LHS<-subset(basket_rules, subset=lhs %in% "Banana" & lift>2)
+inspect(BW_LHS)
+
+FF_RHS<-subset(basket_rules,subset=rhs %in% "Organic Whole Milk" & lift>2)
+inspect(FF_RHS)
+```
